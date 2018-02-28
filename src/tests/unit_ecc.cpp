@@ -148,13 +148,18 @@ std::vector<Test::Result> ECC_Randomized_Tests::run()
             const Botan::PointGFp Q = base_point * b;
             const Botan::PointGFp R = base_point * c;
 
-            const Botan::PointGFp P1 = blinded.mul(a, group_order, Test::rng(), blind_ws);
-            const Botan::PointGFp Q1 = blinded.mul(b, group_order, Test::rng(), blind_ws);
-            const Botan::PointGFp R1 = blinded.mul(c, group_order, Test::rng(), blind_ws);
+            Botan::PointGFp P1 = blinded.mul(a, group_order, Test::rng(), blind_ws);
+            Botan::PointGFp Q1 = blinded.mul(b, group_order, Test::rng(), blind_ws);
+            Botan::PointGFp R1 = blinded.mul(c, group_order, Test::rng(), blind_ws);
 
-            const Botan::PointGFp A1 = P + Q;
-            const Botan::PointGFp A2 = Q + P;
+            Botan::PointGFp A1 = P + Q;
+            Botan::PointGFp A2 = Q + P;
 
+            result.test_eq("p + q", A1, R);
+            result.test_eq("q + p", A2, R);
+
+            A1.force_affine();
+            A2.force_affine();
             result.test_eq("p + q", A1, R);
             result.test_eq("q + p", A2, R);
 
@@ -162,6 +167,13 @@ std::vector<Test::Result> ECC_Randomized_Tests::run()
             result.test_eq("q on the curve", Q.on_the_curve(), true);
             result.test_eq("r on the curve", R.on_the_curve(), true);
 
+            result.test_eq("P1", P1, P);
+            result.test_eq("Q1", Q1, Q);
+            result.test_eq("R1", R1, R);
+
+            P1.force_affine();
+            Q1.force_affine();
+            R1.force_affine();
             result.test_eq("P1", P1, P);
             result.test_eq("Q1", Q1, Q);
             result.test_eq("R1", R1, R);

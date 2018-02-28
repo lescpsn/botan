@@ -9,6 +9,7 @@
 #include <botan/curve_gfp.h>
 #include <botan/curve_nistp.h>
 #include <botan/numthry.h>
+#include <botan/reducer.h>
 #include <botan/internal/mp_core.h>
 #include <botan/internal/mp_asmi.h>
 
@@ -24,11 +25,13 @@ class CurveGFp_Montgomery final : public CurveGFp_Repr
          m_p_words(m_p.sig_words()),
          m_p_dash(monty_inverse(m_p.word_at(0)))
          {
-         const BigInt r = BigInt::power_of_2(m_p_words * BOTAN_MP_WORD_BITS);
+         Modular_Reducer mod_p(p);
 
-         m_r2  = (r * r) % p;
-         m_a_r = (m_a * r) % p;
-         m_b_r = (m_b * r) % p;
+         m_r = mod_p.reduce(BigInt::power_of_2(m_p_words*BOTAN_MP_WORD_BITS));
+         m_r2  = mod_p.square(m_r);
+         m_r3  = mod_p.multiply(m_r, m_r2);
+         m_a_r = mod_p.multiply(m_r, m_a);
+         m_b_r = mod_p.multiply(m_r, m_b);
          }
 
       const BigInt& get_a() const override { return m_a; }
@@ -41,7 +44,11 @@ class CurveGFp_Montgomery final : public CurveGFp_Repr
 
       const BigInt& get_b_rep() const override { return m_b_r; }
 
+      bool is_one(const BigInt& x) const override { return x == m_r; }
+
       size_t get_p_words() const override { return m_p_words; }
+
+      BigInt invert_element(const BigInt& x, secure_vector<word>& ws) const override;
 
       void to_curve_rep(BigInt& x, secure_vector<word>& ws) const override;
 
@@ -53,13 +60,24 @@ class CurveGFp_Montgomery final : public CurveGFp_Repr
       void curve_sqr(BigInt& z, const BigInt& x,
                      secure_vector<word>& ws) const override;
    private:
-      BigInt m_p, m_a, m_b;
+      BigInt m_p;
+      BigInt m_a, m_b;
+      BigInt m_a_r, m_b_r;
       size_t m_p_words; // cache of m_p.sig_words()
 
       // Montgomery parameters
-      BigInt m_r2, m_a_r, m_b_r;
+      BigInt m_r, m_r2, m_r3;
       word m_p_dash;
    };
+
+BigInt CurveGFp_Montgomery::invert_element(const BigInt& x, secure_vector<word>& ws) const
+   {
+   // Should we use Montgomery inverse instead?
+   const BigInt inv = inverse_mod(x, m_p);
+   BigInt res;
+   curve_mul(res, inv, m_r3, ws);
+   return res;
+   }
 
 void CurveGFp_Montgomery::to_curve_rep(BigInt& x, secure_vector<word>& ws) const
    {
@@ -136,11 +154,15 @@ class CurveGFp_NIST : public CurveGFp_Repr
 
       const BigInt& get_b_rep() const override { return m_b; }
 
+      bool is_one(const BigInt& x) const override { return x == 1; }
+
       void to_curve_rep(BigInt& x, secure_vector<word>& ws) const override
          { redc(x, ws); }
 
       void from_curve_rep(BigInt& x, secure_vector<word>& ws) const override
          { redc(x, ws); }
+
+      BigInt invert_element(const BigInt& x, secure_vector<word>& ws) const override;
 
       void curve_mul(BigInt& z, const BigInt& x, const BigInt& y,
                      secure_vector<word>& ws) const override;
@@ -154,6 +176,13 @@ class CurveGFp_NIST : public CurveGFp_Repr
       BigInt m_a, m_b;
       size_t m_p_words; // cache of m_p.sig_words()
    };
+
+
+BigInt CurveGFp_NIST::invert_element(const BigInt& x, secure_vector<word>& ws) const
+   {
+   BOTAN_UNUSED(ws);
+   return inverse_mod(x, get_p());
+   }
 
 void CurveGFp_NIST::curve_mul(BigInt& z, const BigInt& x, const BigInt& y,
                               secure_vector<word>& ws) const

@@ -17,10 +17,6 @@
 #include <botan/mutex.h>
 #include <vector>
 
-#if defined(BOTAN_HAS_SYSTEM_RNG)
-   #include <botan/system_rng.h>
-#endif
-
 namespace Botan {
 
 class EC_Group_Data final
@@ -48,9 +44,6 @@ class EC_Group_Data final
          m_order_bits(order.bits()),
          m_a_is_minus_3(a == p - 3)
          {
-#if defined(BOTAN_HAS_SYSTEM_RNG)
-         m_base_mult.randomize(system_rng());
-#endif
          }
 
       bool match(const BigInt& p, const BigInt& a, const BigInt& b,

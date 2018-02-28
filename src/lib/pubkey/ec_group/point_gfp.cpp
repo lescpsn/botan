@@ -63,9 +63,11 @@ void PointGFp::randomize_repr(RandomNumberGenerator& rng)
       }
    }
 
-// Point addition
-void PointGFp::add(const PointGFp& rhs, std::vector<BigInt>& ws_bn)
+void PointGFp::add_affine(const PointGFp& rhs, std::vector<BigInt>& ws_bn)
    {
+   if(rhs.is_zero())
+      return;
+
    if(is_zero())
       {
       m_coord_x = rhs.m_coord_x;
@@ -73,8 +75,110 @@ void PointGFp::add(const PointGFp& rhs, std::vector<BigInt>& ws_bn)
       m_coord_z = rhs.m_coord_z;
       return;
       }
-   else if(rhs.is_zero())
+
+   BOTAN_ASSERT(rhs.is_affine(), "PointGFp::add_affine requires arg be affine point");
+
+   /*
+   https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-3.html#addition-add-1998-cmo-2
+   simplified with Z2 = 1
+   */
+
+   const BigInt& p = m_curve.get_p();
+
+   const size_t cap_size = 2*m_curve.get_p_words() + 2;
+   for(size_t i = 0; i != ws_bn.size(); ++i)
+      ws_bn[i].ensure_capacity(cap_size);
+
+   BigInt& S1 = ws_bn[2];
+
+   BigInt& lhs_z2 = ws_bn[3];
+   BigInt& U2 = ws_bn[4];
+   BigInt& S2 = ws_bn[5];
+
+   BigInt& H = ws_bn[6];
+   BigInt& r = ws_bn[7];
+
+   BigInt& tmp = ws_bn[8];
+
+   secure_vector<word>& monty_ws = ws_bn[9].get_word_vector();
+
+   S1 = m_coord_y;
+
+   m_curve.sqr(lhs_z2, m_coord_z, monty_ws);
+   m_curve.mul(U2, rhs.m_coord_x, lhs_z2, monty_ws);
+
+   m_curve.mul(tmp, m_coord_z, lhs_z2, monty_ws);
+   m_curve.mul(S2, rhs.m_coord_y, tmp, monty_ws);
+
+   H = U2;
+   H -= m_coord_x;
+   if(H.is_negative())
+      H += p;
+
+   r = S2;
+   r -= S1;
+   if(r.is_negative())
+      r += p;
+
+   if(H.is_zero())
+      {
+      if(r.is_zero())
+         {
+         mult2(ws_bn);
+         return;
+         }
+
+      // setting to zero:
+      m_coord_x = 0;
+      m_coord_y = 1;
+      m_coord_z = 0;
       return;
+      }
+
+   m_curve.sqr(U2, H, monty_ws);
+
+   m_curve.mul(S2, U2, H, monty_ws);
+
+   m_curve.mul(tmp, U2, m_coord_x, monty_ws);
+   U2 = tmp;
+
+   m_curve.sqr(m_coord_x, r, monty_ws);
+   m_coord_x -= S2;
+   m_coord_x -= U2;
+   m_coord_x -= U2;
+   while(m_coord_x.is_negative())
+      m_coord_x += p;
+
+   U2 -= m_coord_x;
+   if(U2.is_negative())
+      U2 += p;
+
+   m_curve.mul(m_coord_y, r, U2, monty_ws);
+   m_curve.mul(tmp, S1, S2, monty_ws);
+   m_coord_y -= tmp;
+   if(m_coord_y.is_negative())
+      m_coord_y += p;
+
+   tmp.swap(m_coord_z);
+   m_curve.mul(m_coord_z, tmp, H, monty_ws);
+   }
+
+// Point addition
+void PointGFp::add(const PointGFp& rhs, std::vector<BigInt>& ws_bn)
+   {
+   if(rhs.is_zero())
+      return;
+
+   if(rhs.is_affine())
+      return this->add_affine(rhs, ws_bn);
+
+   if(is_zero())
+      {
+      m_coord_x = rhs.m_coord_x;
+      m_coord_y = rhs.m_coord_y;
+      m_coord_z = rhs.m_coord_z;
+      return;
+      }
 
    const BigInt& p = m_curve.get_p();
 
@@ -191,7 +295,7 @@ void PointGFp::mult2(std::vector<BigInt>& ws_bn)
    BigInt& y_2 = ws_bn[0];
    BigInt& S = ws_bn[1];
    BigInt& tmp = ws_bn[2];
-   BigInt& a_z4 = ws_bn[3];
+   BigInt& z2 = ws_bn[3];
    BigInt& M = ws_bn[4];
    BigInt& U = ws_bn[5];
    BigInt& x = ws_bn[6];
@@ -206,14 +310,41 @@ void PointGFp::mult2(std::vector<BigInt>& ws_bn)
    S <<= 2; // * 4
    S.reduce_below(p, tmp.get_word_vector());
 
-   m_curve.sqr(a_z4, m_coord_z, monty_ws); // z^2
-   m_curve.sqr(tmp, a_z4, monty_ws); // z^4
-   m_curve.mul(a_z4, m_curve.get_a_rep(), tmp, monty_ws);
+   m_curve.sqr(z2, m_coord_z, monty_ws); // z^2
 
-   m_curve.sqr(M, m_coord_x, monty_ws);
-   M *= 3;
-   M += a_z4;
-   M.reduce_below(p, tmp.get_word_vector());
+   /*
+   M = 3*x^2 + a*z^4
+
+   if a is -3 then
+        M = 3*x^2 + -3*^z4 = 3*(x^2-z^4) = 3*(x+z^2)*(x-z^2)
+   */
+
+#if 0
+      {
+      // a == -3 case
+      U = m_coord_x + z2;
+      U.reduce_below(p, tmp.get_word_vector());
+
+      tmp = m_coord_x - z2;
+      if(tmp.is_negative())
+         tmp += p;
+
+      m_curve.mul(M, tmp, U, monty_ws);
+
+      M *= 3;
+      M.reduce_below(p, tmp.get_word_vector());
+      }
+#else
+      {
+      m_curve.sqr(M, m_coord_x, monty_ws);
+      m_curve.sqr(tmp, z2, monty_ws); // z^4
+      m_curve.mul(z2, m_curve.get_a_rep(), tmp, monty_ws); // a*z^4
+
+      M *= 3;
+      M += z2;
+      M.reduce_below(p, tmp.get_word_vector());
+      }
+#endif
 
    m_curve.sqr(x, M, monty_ws);
    x -= S;
@@ -354,17 +485,48 @@ PointGFp operator*(const BigInt& scalar, const PointGFp& point)
    return R[0];
    }
 
+void PointGFp::force_affine()
+   {
+   if(is_zero())
+      throw Invalid_State("Cannot convert zero ECC point to affine");
+
+   secure_vector<word> ws;
+   BigInt z2 = m_curve.sqr_to_tmp(m_coord_z, ws);
+   BigInt z3 = m_curve.mul_to_tmp(m_coord_z, z2, ws);
+
+   const BigInt z5 = m_curve.mul_to_tmp(z2, z3, ws);
+   const BigInt z5_inv = m_curve.invert_element(z5, ws);
+   const BigInt z2_inv = m_curve.mul_to_tmp(z5_inv, z3, ws);
+   const BigInt z3_inv = m_curve.mul_to_tmp(z5_inv, z2, ws);
+
+   m_coord_x = m_curve.mul_to_tmp(m_coord_x, z2_inv, ws);
+   m_coord_y = m_curve.mul_to_tmp(m_coord_y, z3_inv, ws);
+   m_coord_z = 1;
+   m_curve.to_rep(m_coord_z, ws);
+   }
+
+bool PointGFp::is_affine() const
+   {
+   return m_curve.is_one(m_coord_z);
+   }
+
 BigInt PointGFp::get_affine_x() const
    {
    if(is_zero())
       throw Illegal_Transformation("Cannot convert zero point to affine");
 
    secure_vector<word> monty_ws;
-   BigInt z2 = m_curve.sqr_to_tmp(m_coord_z, monty_ws);
-   m_curve.from_rep(z2, monty_ws);
-   z2 = inverse_mod(z2, m_curve.get_p());
 
-   return m_curve.mul_to_tmp(z2, m_coord_x, monty_ws);
+   if(is_affine())
+      return m_curve.from_rep(m_coord_x, monty_ws);
+
+   const BigInt z2 = m_curve.sqr_to_tmp(m_coord_z, monty_ws);
+   const BigInt z2_inv = m_curve.invert_element(z2, monty_ws);
+
+   BigInt r;
+   m_curve.mul(r, m_coord_x, z2_inv, monty_ws);
+   m_curve.from_rep(r, monty_ws);
+   return r;
    }
 
 BigInt PointGFp::get_affine_y() const
@@ -373,11 +535,18 @@ BigInt PointGFp::get_affine_y() const
       throw Illegal_Transformation("Cannot convert zero point to affine");
 
    secure_vector<word> monty_ws;
-   BigInt z3 = m_curve.mul_to_tmp(m_coord_z, m_curve.sqr_to_tmp(m_coord_z, monty_ws), monty_ws);
-   z3 = inverse_mod(z3, m_curve.get_p());
-   m_curve.to_rep(z3, monty_ws);
 
-   return m_curve.mul_to_tmp(z3, m_coord_y, monty_ws);
+   if(is_affine())
+      return m_curve.from_rep(m_coord_y, monty_ws);
+
+   const BigInt z2 = m_curve.sqr_to_tmp(m_coord_z, monty_ws);
+   const BigInt z3 = m_curve.mul_to_tmp(m_coord_z, z2, monty_ws);
+   const BigInt z3_inv = m_curve.invert_element(z3, monty_ws);
+
+   BigInt r;
+   m_curve.mul(r, m_coord_y, z3_inv, monty_ws);
+   m_curve.from_rep(r, monty_ws);
+   return r;
    }
 
 bool PointGFp::on_the_curve() const

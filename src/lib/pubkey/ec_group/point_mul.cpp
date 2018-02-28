@@ -20,7 +20,7 @@ PointGFp_Blinded_Multiplier::PointGFp_Blinded_Multiplier(const PointGFp& base,
 PointGFp_Blinded_Multiplier::PointGFp_Blinded_Multiplier(const PointGFp& base,
                                                          size_t w)
    {
-   std::vector<BigInt> ws(9);
+   std::vector<BigInt> ws(PointGFp::WORKSPACE_SIZE);
    init(base, w, ws);
    }
 
@@ -46,13 +46,11 @@ void PointGFp_Blinded_Multiplier::init(const PointGFp& base,
       m_U[i] = m_U[i-1];
       m_U[i].add(base, ws);
       }
-   }
 
-void PointGFp_Blinded_Multiplier::randomize(RandomNumberGenerator& rng)
-   {
-   // Randomize each point representation (Coron's 3rd countermeasure)
-   for(size_t i = 0; i != m_U.size(); ++i)
-      m_U[i].randomize_repr(rng);
+   for(size_t i = 1; i != m_U.size(); ++i)
+      {
+      m_U[i].force_affine();
+      }
    }
 
 PointGFp PointGFp_Blinded_Multiplier::mul(const BigInt& k,
@@ -84,7 +82,7 @@ PointGFp PointGFp_Blinded_Multiplier::mul(const BigInt& k,
       {
       windows--;
       const uint32_t nibble = scalar.get_substring(windows*m_h, m_h);
-      R.add(m_U[nibble], ws);
+      R.add_affine(m_U[nibble], ws);
 
       /*
       Randomize after adding the first nibble as before the addition R
@@ -100,7 +98,7 @@ PointGFp PointGFp_Blinded_Multiplier::mul(const BigInt& k,
 
          const uint32_t inner_nibble = scalar.get_substring((windows-1)*m_h, m_h);
          // cache side channel here, we are relying on blinding...
-         R.add(m_U[inner_nibble], ws);
+         R.add_affine(m_U[inner_nibble], ws);
          windows--;
          }
       }

@@ -149,6 +149,13 @@ class BOTAN_PUBLIC_API(2,0) PointGFp final
       BigInt get_affine_y() const;
 
       /**
+      * Force this point to affine coordinates
+      */
+      void force_affine();
+
+      bool is_affine() const;
+
+      /**
       * Is this the point at infinity?
       * @result true, if this point is at infinity, false otherwise.
       */
@@ -184,6 +191,13 @@ class BOTAN_PUBLIC_API(2,0) PointGFp final
       * @param workspace temp space, at least WORKSPACE_SIZE elements
       */
       void add(const PointGFp& other, std::vector<BigInt>& workspace);
+
+      /**
+      * Point addition - mixed J+A
+      * @param other affine point to add
+      * @param workspace temp space, at least WORKSPACE_SIZE elements
+      */
+      void add_affine(const PointGFp& other, std::vector<BigInt>& workspace);
 
       /**
       * Point doubling
@@ -307,13 +321,6 @@ class BOTAN_PUBLIC_API(2,5) PointGFp_Blinded_Multiplier final
                                   size_t w = 0);
 
       /**
-      * Randomize the internal state. Changing the values may provide
-      * some protection against side channel attacks.
-      * @param rng a random number generator
-      */
-      void randomize(RandomNumberGenerator& rng);
-
-      /**
       * Perform blinded point multiplication
       * @param k the scalar
       * @param group_order the order of the group
@@ -340,7 +347,6 @@ class BOTAN_PUBLIC_API(2,0) BOTAN_DEPRECATED("Use PointGFp_Blinded_Multiplier") 
 
       PointGFp blinded_multiply(const BigInt& scalar, RandomNumberGenerator& rng)
          {
-         m_point_mul.randomize(rng);
          return m_point_mul.mul(scalar, m_order, rng, m_ws);
          }
    private:
